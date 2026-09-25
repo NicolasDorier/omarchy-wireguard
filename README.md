@@ -2,10 +2,11 @@
 
 A WireGuard integration for Omarchy 4.x.
 
-It adds a status dot beside the Network widget and a searchable location panel.
-Green means the tunnel, default route, DNS, IPv6 policy, and recent WireGuard
-handshake are verified. Amber means connecting, red means enabled but failed,
-and a muted hollow dot means disabled or temporarily paused.
+It adds a WireGuard status icon beside the Network widget and a searchable
+location panel. The WireGuard logo means disabled or temporarily paused.
+When connected, the icon becomes the VPN location's country flag: green means
+the tunnel, default route, DNS, IPv6 policy, and recent WireGuard handshake are
+verified. Amber means connecting and red means enabled but failed.
 
 ## Install
 
@@ -13,7 +14,7 @@ and a muted hollow dot means disabled or temporarily paused.
 omarchy plugin add https://github.com/nicolasdorier/omarchy-wireguard.git --enable
 ```
 
-Click the new bar dot, choose **Install backend**, and authorize the Polkit
+Click the new bar icon, choose **Install backend**, and authorize the Polkit
 prompt. The installer adds `wireguard-tools`, a narrowly scoped root service,
 and a dedicated nftables kill-switch table without changing UFW rules.
 

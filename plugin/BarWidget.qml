@@ -25,6 +25,7 @@ Panel {
   readonly property color warning: themeColors.yellow || Color.accent
   readonly property color errorColor: themeColors.red || (bar ? bar.urgent : Color.urgent)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property string iconFontFamily: "JetBrainsMono Nerd Font"
   readonly property var locations: service.filteredLocations
   readonly property bool firstRowDisconnects: locations.length > 0 && Model.shouldDisconnectLocation(locations[0], service.status.state)
   readonly property string statusCountryCode: Model.statusCountryCode(service.status)
@@ -170,15 +171,13 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.bar.iconFont
         }
-        Rectangle {
+        Text {
           visible: !root.showCountryFlag
           anchors.centerIn: parent
-          width: Style.space(7)
-          height: width
-          radius: width / 2
-          color: service.status.state === "disabled" || service.status.state === "paused" ? "transparent" : root.stateColor
-          border.width: service.status.state === "disabled" || service.status.state === "paused" ? Math.max(1, Style.space(1)) : 0
-          border.color: root.stateColor
+          text: "\uf383"
+          color: service.status.state === "disabled" || service.status.state === "paused" ? root.foreground : root.stateColor
+          font.family: root.iconFontFamily
+          font.pixelSize: Style.bar.iconFont
         }
         Rectangle {
           visible: root.showCountryFlag
