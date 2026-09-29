@@ -79,7 +79,7 @@ class FakeSystem:
         if self.fail_dns_restore:
             raise SystemFailure("DNS restore failed")
 
-    def configure_lan_dns(self, context, timeout=10):
+    def configure_lan_dns(self, context, timeout=10, *, endpoint_host=None):
         self.events.append("configure_lan_dns")
         self.dns_configurations += 1
         resolver = f"192.168.1.{self.dns_configurations}"

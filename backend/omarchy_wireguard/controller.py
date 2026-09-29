@@ -8,7 +8,7 @@ from .constants import CITY_BUDGET, MAX_RETRY, PAUSE_SECONDS, PROFILE_PREFIX, WI
 from .importer import ImportFailure, decode_payload, parse_profiles
 from .nftables import FirewallContext
 from .storage import StateStore
-from .system import DnsRestoreState, HostSystem, SystemFailure
+from .system import DnsRestoreState, HostSystem, SystemFailure, bootstrap_hostname
 
 
 class RequestFailure(ValueError):
@@ -98,6 +98,7 @@ class Controller:
         network_context(self.network_policy, FirewallContext())
         self.catalog: list[dict[str, Any]] = store.read("profiles.json", [])
         self.dns_restore = _dns_restore_state(store.read("dns.json", []))
+        self.bootstrap_interfaces: set[str] = {item[0] for item in self.dns_restore}
         persisted = store.read("state.json", None)
         if persisted is None:
             persisted = {"enabled": False, "target": None, "mru": []}
@@ -229,6 +230,9 @@ class Controller:
             raise RequestFailure("connect requires only a city string")
         if args["city"] not in {item["city_key"] for item in self.catalog}:
             raise RequestFailure("unknown city")
+        for profile in self.catalog:
+            if profile["city_key"] == args["city"]:
+                bootstrap_hostname(profile["endpoint_host"])
         self.enabled, self.target, self.mode = True, args["city"], "connecting"
         self.pause_until = None
         self.retry_count = 0
@@ -338,7 +342,7 @@ class Controller:
                 break
             try:
                 base = network_context(self.network_policy, self.system.inspect_firewall_context(remaining()))
-                base = self._configure_lan_dns(base, remaining)
+                base = self._configure_lan_dns(base, remaining, profile["endpoint_host"])
                 # Permit only resolved's physical-link DNS before resolving a hostname;
                 # all application traffic remains blocked during this transition.
                 self.system.apply_firewall(base, remaining())
@@ -438,7 +442,10 @@ class Controller:
         self.current = None
         self.interface = None
         self.firewall_context = None
-        self._fail_closed()
+        try:
+            self._fail_closed()
+        finally:
+            self._clear_bootstrap_dns()
 
     def _direct_disconnect(self) -> None:
         if self.interface:
@@ -446,19 +453,27 @@ class Controller:
                 self.system.clear_tunnel_dns(self.interface)
             except SystemFailure:
                 pass
-        self.system.deactivate_managed()
+        try:
+            self.system.deactivate_managed()
+        except SystemFailure:
+            self._clear_bootstrap_dns()
+            raise
         self.current = None
         self.interface = None
         self.firewall_context = None
         self.system.restore_lan_dns(self.dns_restore)
+        self.bootstrap_interfaces.clear()
         self.system.remove_firewall()
 
     def _configure_lan_dns(self, base: FirewallContext,
-                           remaining: Callable[[], float]) -> FirewallContext:
+                           remaining: Callable[[], float],
+                           endpoint_host: str | None = None) -> FirewallContext:
+        hostname = bootstrap_hostname(endpoint_host)
         physical = set(base.physical_interfaces)
         stale = tuple(item for item in self.dns_restore if item[0] not in physical)
         if stale:
             self.system.restore_lan_dns(stale, remaining())
+            self.bootstrap_interfaces.difference_update(item[0] for item in stale)
         retained = tuple(item for item in self.dns_restore if item[0] in physical)
         known = {interface for interface, _domains, _default in retained}
         missing = tuple(interface for interface in base.physical_interfaces if interface not in known)
@@ -468,7 +483,29 @@ class Controller:
         if updated != self.dns_restore:
             self.dns_restore = updated
             self.store.write("dns.json", self.dns_restore)
-        return self.system.configure_lan_dns(base, remaining())
+        if hostname:
+            self.bootstrap_interfaces.update(base.physical_interfaces)
+            return self.system.configure_lan_dns(
+                base, remaining(), endpoint_host=hostname)
+        result = self.system.configure_lan_dns(base, remaining())
+        self.bootstrap_interfaces.difference_update(base.physical_interfaces)
+        return result
+
+    def _clear_bootstrap_dns(self) -> None:
+        if not self.bootstrap_interfaces:
+            return
+        try:
+            physical = set(self.system.inspect_firewall_context().physical_interfaces)
+            state = tuple((interface, ("~lan",), False) if interface in physical else item
+                          for item in self.dns_restore
+                          for interface in (item[0],)
+                          if interface in self.bootstrap_interfaces)
+            self.system.restore_lan_dns(state)
+        except SystemFailure as exc:
+            self.mode, self.last_error = "failed", "endpoint bootstrap DNS cleanup failed"
+            self.retry_at = None
+            raise SystemFailure(self.last_error) from exc
+        self.bootstrap_interfaces.clear()
 
     def _clear_dns_restore(self) -> None:
         self.dns_restore = ()
